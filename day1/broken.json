@@ -1,2 +1,3 @@
 [
-  {"id": 1, "title": "React Fundamentals", "author": "olena",
+  {"id": 1, "title": "React Fundamentals", "author": "olena", "hours": 12, "published": true, "tags": ["frontend", "react"]},
+  {"id": 2, "title": "Django ORM Deep Dive", "author": "petro", "hours": 20, "published": true, "tags": ["backend", "django"]},

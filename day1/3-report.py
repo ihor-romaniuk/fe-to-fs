@@ -51,7 +51,7 @@ def render_row(s: AuthorStats) -> str:
     return f"{s.author:<16}{s.courses:>8}{s.published:>10}{s.total_hours:>12}{s.avg_hours:>10.2f}"
 
 
-# Валідація — без змін із задачі 2, докладні пояснення в 2-report.py.
+# Валідація — з задачі 2, докладні пояснення в 2-report.py.
 class ValidationError(Exception):
     def __init__(self, rule: str, field: str, detail: str):
         super().__init__(f"rule={rule} field={field}: {detail}")
@@ -109,7 +109,7 @@ def check_non_empty_text(record: dict) -> None:
         raise ValidationError("non_empty_text", "author", f"expected non-empty, got {author!r}")
 
 
-def validate_record(record: dict, seen_ids: set[int]) -> None:
+def validate_course(record: dict, seen_ids: set[int]) -> None:
     check_required_fields(record)
     check_types(record)
     check_id_unique_positive(record, seen_ids)
@@ -124,7 +124,7 @@ def split_valid(records: list) -> list[dict]:
     valid = []
     for index, record in enumerate(records):
         try:
-            validate_record(record, seen_ids)
+            validate_course(record, seen_ids)
         except ValidationError as e:
             print(
                 f"[invalid] index={index} id={record.get('id', '?')} "
@@ -179,7 +179,7 @@ def make_stats(author: str, records: list[dict]) -> AuthorStats:
 # Сортування з задачі 1, п. 8: мінус дає спадання за годинами, author —
 # стабільний порядок при рівних годинах. Без другого ключа порядок залежав
 # би від порядку рядків у файлі, і звіт "змінювався" б на тих самих даних.
-def build_author_stats(valid: list[dict]) -> list[AuthorStats]:
+def aggregate(valid: list[dict]) -> list[AuthorStats]:
     # list comprehension — аналог map; .items() — як Object.entries.
     stats = [make_stats(author, records) for author, records in group_by_author(valid).items()]
     return sorted(stats, key=lambda s: (-s.total_hours, s.author))
@@ -197,11 +197,19 @@ def render_report(source: str, total: int, valid: list[dict]) -> str:
         HEADER,
         SEP,
         # * розпаковує генератор у список, як spread ...arr у JS.
-        *(render_row(s) for s in build_author_stats(valid)),
+        *(render_row(s) for s in aggregate(valid)),
         SEP,
         render_row(make_stats("TOTAL", valid)),
     ]
     return "\n".join(lines)
+
+
+# Читання окремо від політики: функція лише відкриває й парсить файл, а що
+# робити з помилкою (який текст, який exit code) вирішує main.
+# with закриває файл навіть при винятку, як try/finally.
+def load_courses(path: str) -> list:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def main(argv: list[str]) -> int:
@@ -211,8 +219,7 @@ def main(argv: list[str]) -> int:
     path = argv[1]
 
     try:
-        with open(path, encoding="utf-8") as f:
-            records = json.load(f)
+        records = load_courses(path)
     except FileNotFoundError:
         print(f"error: file not found: {path}", file=sys.stderr)
         return EXIT_BAD_INPUT

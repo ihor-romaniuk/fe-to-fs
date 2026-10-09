@@ -1,0 +1,9 @@
+[
+  {"id": 1, "title": "React Fundamentals", "author": "olena", "hours": 12, "published": true, "tags": ["frontend", "react"]},
+  {"id": 2, "title": "Django ORM Deep Dive", "author": "petro", "hours": 20, "published": true, "tags": ["backend", "django"]},
+  {"id": 3, "title": "Python for JS Developers", "author": "olena", "hours": 8, "published": false, "tags": ["python"]},
+  {"id": 4, "title": "Testing with pytest", "author": "petro", "hours": "6", "published": true, "tags": ["backend", "tests"]},
+  {"id": 5, "title": "Docker Basics", "hours": 10, "published": true, "tags": ["devops"]},
+  {"id": 6, "title": "Celery in Production", "author": "petro", "hours": -4, "published": true, "tags": ["backend", "celery"]},
+  {"id": 1, "title": "React Hooks in Practice", "author": "olena", "hours": 6, "published": true, "tags": ["frontend", "react"]}
+]
