@@ -4,6 +4,8 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 
+from reporter.instrument import timed
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,7 +53,9 @@ def make_stats(author: str, records: list[dict]) -> AuthorStats:
 
 
 # Мінус дає спадання за годинами, author — стабільний порядок при рівних годинах.
+@timed
 def aggregate(valid: list[dict]) -> list[AuthorStats]:
+    """Статистика по авторах, від більшої кількості годин до меншої."""
     logger.debug("aggregating %s valid records", len(valid))
     stats = [make_stats(author, records) for author, records in group_by_author(valid).items()]
     return sorted(stats, key=lambda s: (-s.total_hours, s.author))

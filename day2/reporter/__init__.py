@@ -1,11 +1,10 @@
-"""Задача 3. logging замість print у пакеті reporter.
+"""Задача 4. Декоратор @timed і контекстний менеджер.
 
 Запуск з теки day2:
-    .venv/bin/python -m reporter courses.json
-    .venv/bin/python -m reporter courses.json --verbose     # + рядки DEBUG
+    .venv/bin/python -m reporter courses.json --verbose     # рядки "... took N ms"
 Перевірка:
-    .venv/bin/python -m reporter courses.json 2>&1 1>/dev/null | grep -c WARNING   # 3
-    .venv/bin/python -m reporter courses.json 2>/dev/null | diff -u expected_report.txt -
+    .venv/bin/python -c "from reporter.loading import load_courses; print(load_courses.__name__)"
+    .venv/bin/python experiments.py                          # передбачення з NOTES.md
 
 Тека з __init__.py — звичайний пакет: import reporter виконує цей файл.
 python -m reporter шукає пакет у sys.path (туди входить поточна тека) і

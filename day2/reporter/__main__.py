@@ -5,6 +5,7 @@ import json
 import logging
 import sys
 
+from reporter.instrument import Timer, timer
 from reporter.loading import load_courses
 from reporter.rendering import print_report
 from reporter.validation import split_valid
@@ -48,13 +49,17 @@ def main(argv: list[str]) -> int:
         logger.error("%s is not valid JSON: %s", args.path, e)
         return EXIT_BAD_INPUT
 
-    valid = split_valid(records)
+    # Декоратор міряє функцію цілком, контекстний менеджер — довільний блок.
+    # Обидва варіанти взаємозамінні; тут по одному, щоб кожен працював.
+    with Timer("split_valid"):
+        valid = split_valid(records)
     rejected = len(records) - len(valid)
     if rejected:
         # INFO, а не WARNING: попередження — по одному на кожен запис, а це підсумок.
         logger.info("[invalid] summary: %s of %s records rejected", rejected, len(records))
 
-    print_report(args.path, len(records), valid)
+    with timer("print_report"):
+        print_report(args.path, len(records), valid)
     return EXIT_INVALID if rejected else EXIT_OK
 
 
