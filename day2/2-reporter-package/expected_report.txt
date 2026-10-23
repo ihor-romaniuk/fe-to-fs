@@ -1,0 +1,9 @@
+=== COURSE REPORT ===
+source: courses.json
+records: 6 total, 3 valid, 3 invalid
+author           courses published total_hours avg_hours
+--------------------------------------------------------
+olena                  2         1          20     10.00
+petro                  1         1          20     20.00
+--------------------------------------------------------
+TOTAL                  3         2          40     13.33
