@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# report_ai.py із задачі 1 — код Claude Code, збережений як є для порівняння:
+# NOTES.md посилається на номери його рядків, тому ruff його не чіпає.
+extend-exclude = ["1-ai-comparison"]
+
+[tool.ruff.lint]
+# G - f-string у logging, BLE - except Exception,
+# B - mutable default, ANN - відсутні type hints
+select = ["E", "F", "I", "UP", "B", "SIM", "G", "BLE", "ANN"]
