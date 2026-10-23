@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# G - f-string у logging, BLE - except Exception,
+# B - mutable default, ANN - відсутні type hints
+select = ["E", "F", "I", "UP", "B", "SIM", "G", "BLE", "ANN"]
