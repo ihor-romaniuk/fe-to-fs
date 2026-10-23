@@ -1,6 +1,10 @@
-"""Правила R1-R5. Докладні пояснення до кожного — у day1/2-report.py."""
+"""Правила R1-R5 і відбір валідних записів. Пояснення до правил — у day1/2-report.py."""
+
+import logging
 
 from reporter.errors import ValidationError
+
+logger = logging.getLogger(__name__)
 
 FIELD_TYPES = {
     "id": int,
@@ -70,3 +74,29 @@ def validate_course(record: dict, seen_ids: set[int]) -> None:
     check_id_unique_positive(record, seen_ids)
     check_hours_range(record)
     check_non_empty_text(record)
+
+
+# Цикл повернувся сюди з __main__. У задачі 2 він друкував у stderr, а це справа
+# CLI. logger.warning не знає, куди піде рядок: це вирішує basicConfig у __main__.
+def split_valid(records: list) -> list[dict]:
+    seen_ids: set[int] = set()
+    valid = []
+    for index, record in enumerate(records):
+        try:
+            validate_course(record, seen_ids)
+        except ValidationError as e:
+            # Аргументи окремо, а не f-string: logging підставляє їх у %s, лише
+            # коли рядок справді йде у вивід. f-string зібрався б завжди, навіть
+            # якщо рівень логера його відкине. Ruff ловить f-string у logging (G004).
+            logger.warning(
+                "[invalid] index=%s id=%s rule=%s field=%s: %s",
+                index,
+                record.get("id", "?"),
+                e.rule,
+                e.field,
+                e.detail,
+            )
+        else:
+            seen_ids.add(record["id"])
+            valid.append(record)
+    return valid

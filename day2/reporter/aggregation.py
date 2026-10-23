@@ -1,7 +1,10 @@
 """Групування валідних записів за автором і підрахунок агрегатів."""
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 # @dataclass генерує __init__, __repr__ і __eq__ з анотованих полів — як
@@ -49,5 +52,6 @@ def make_stats(author: str, records: list[dict]) -> AuthorStats:
 
 # Мінус дає спадання за годинами, author — стабільний порядок при рівних годинах.
 def aggregate(valid: list[dict]) -> list[AuthorStats]:
+    logger.debug("aggregating %s valid records", len(valid))
     stats = [make_stats(author, records) for author, records in group_by_author(valid).items()]
     return sorted(stats, key=lambda s: (-s.total_hours, s.author))

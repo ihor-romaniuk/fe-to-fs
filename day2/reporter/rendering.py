@@ -1,4 +1,4 @@
-"""Текст звіту для stdout."""
+"""Звіт для stdout."""
 
 from reporter.aggregation import AuthorStats, aggregate, make_stats
 
@@ -27,3 +27,10 @@ def render_report(source: str, total: int, valid: list[dict]) -> str:
         render_row(make_stats("TOTAL", valid)),
     ]
     return "\n".join(lines)
+
+
+# Єдиний print у пакеті. Таблиця — це дані, результат програми: її
+# перенаправляють у файл або diff. Лог — розповідь про те, як програма
+# працювала; він іде в stderr через logging, тому 2>/dev/null лишає рівно звіт.
+def print_report(source: str, total: int, valid: list[dict]) -> None:
+    print(render_report(source, total, valid))

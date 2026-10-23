@@ -1,59 +1,60 @@
-"""Точка входу: аргументи, діагностика в stderr і exit codes."""
+"""Точка входу: аргументи, налаштування logging і exit codes."""
 
+import argparse
 import json
+import logging
 import sys
 
-from reporter.errors import ReporterError
 from reporter.loading import load_courses
-from reporter.rendering import render_report
-from reporter.validation import validate_course
+from reporter.rendering import print_report
+from reporter.validation import split_valid
 
 EXIT_OK = 0
 EXIT_INVALID = 1
 EXIT_BAD_INPUT = 2
 
+# Під -m __name__ цього файлу — "__main__", тому в логах саме це ім'я.
+logger = logging.getLogger(__name__)
 
-# Цикл живе тут, а не у validation.py, бо друкує в stderr, а діагностика — справа
-# CLI. Ловимо базовий ReporterError: except ловить і нащадків, тож сюди потрапляє
-# ValidationError. Текст "rule=... field=...: ..." дає його __str__.
-def split_valid(records: list) -> list[dict]:
-    seen_ids: set[int] = set()
-    valid = []
-    for index, record in enumerate(records):
-        try:
-            validate_course(record, seen_ids)
-        except ReporterError as e:
-            print(f"[invalid] index={index} id={record.get('id', '?')} {e}", file=sys.stderr)
-        else:
-            seen_ids.add(record["id"])
-            valid.append(record)
-    return valid
+
+# argparse — як commander або yargs у Node: сам будує usage і -h. На помилці
+# аргументів друкує usage у stderr і виходить з кодом 2. Це збігається з
+# EXIT_BAD_INPUT, бо 2 для "неправильний виклик" — загальна Unix-конвенція.
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="python3 -m reporter")
+    parser.add_argument("path", help="JSON-файл із курсами")
+    parser.add_argument("--verbose", action="store_true", help="показати рядки DEBUG")
+    return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        # З -m argv[0] — повний шлях до __main__.py, тому команду пишемо явно.
-        print("usage: python3 -m reporter <courses.json>", file=sys.stderr)
-        return EXIT_BAD_INPUT
-    path = argv[1]
+    args = parse_args(argv[1:])
+
+    # Єдиний basicConfig у проєкті. Модулі лише беруть свій logger і пишуть у
+    # нього, а куди й що виводити, вирішується тут. Без stream= basicConfig
+    # вішає на кореневий логер StreamHandler у sys.stderr, тож stdout лишається
+    # для звіту. Рівень — це поріг: на INFO виклики logger.debug відкидаються.
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 
     try:
-        records = load_courses(path)
+        records = load_courses(args.path)
     except FileNotFoundError:
-        print(f"error: file not found: {path}", file=sys.stderr)
+        logger.error("file not found: %s", args.path)
         return EXIT_BAD_INPUT
     except json.JSONDecodeError as e:
-        print(f"error: {path} is not valid JSON: {e}", file=sys.stderr)
+        logger.error("%s is not valid JSON: %s", args.path, e)
         return EXIT_BAD_INPUT
 
     valid = split_valid(records)
     rejected = len(records) - len(valid)
     if rejected:
-        print(f"[invalid] summary: {rejected} of {len(records)} records rejected", file=sys.stderr)
+        # INFO, а не WARNING: попередження — по одному на кожен запис, а це підсумок.
+        logger.info("[invalid] summary: %s of %s records rejected", rejected, len(records))
 
-    # Звіт друкуємо й тоді, коли є невалідні записи: діагностика вже пішла в
-    # stderr, а stdout отримує лише звіт.
-    print(render_report(path, len(records), valid))
+    print_report(args.path, len(records), valid)
     return EXIT_INVALID if rejected else EXIT_OK
 
 
