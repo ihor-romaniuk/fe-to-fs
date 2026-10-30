@@ -1,10 +1,11 @@
-"""Задача 4. Декоратор @timed і контекстний менеджер.
+"""Задача 5. Генератор iter_lines і читання .jsonl.
 
 Запуск з теки day2:
-    .venv/bin/python -m reporter courses.json --verbose     # рядки "... took N ms"
+    .venv/bin/python -m reporter courses.jsonl
 Перевірка:
-    .venv/bin/python -c "from reporter.loading import load_courses; print(load_courses.__name__)"
-    .venv/bin/python experiments.py                          # передбачення з NOTES.md
+    diff <(.venv/bin/python -m reporter courses.json 2>/dev/null) \\
+         <(.venv/bin/python -m reporter courses.jsonl 2>/dev/null)   # лише рядок source:
+    .venv/bin/python bench_mem.py                 # peak readlines > 10 MB, генератора < 1 MB
 
 Тека з __init__.py — звичайний пакет: import reporter виконує цей файл.
 python -m reporter шукає пакет у sys.path (туди входить поточна тека) і

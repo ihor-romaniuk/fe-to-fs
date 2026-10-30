@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # EXIT_BAD_INPUT, бо 2 для "неправильний виклик" — загальна Unix-конвенція.
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python3 -m reporter")
-    parser.add_argument("path", help="JSON-файл із курсами")
+    parser.add_argument("path", help="файл із курсами: .json (масив) або .jsonl (рядок на курс)")
     parser.add_argument("--verbose", action="store_true", help="показати рядки DEBUG")
     return parser.parse_args(argv)
 
@@ -40,6 +40,8 @@ def main(argv: list[str]) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
+    # Формат load_courses вибирає за розширенням: .jsonl читає генератором
+    # iter_lines і парсить кожен рядок окремо. Помилки в обох форматів ті самі.
     try:
         records = load_courses(args.path)
     except FileNotFoundError:
