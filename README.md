@@ -37,4 +37,7 @@ python3 experiments.py
 # 5. Генератор: звіти .json і .jsonl різняться лише рядком source:
 diff <(python3 -m reporter courses.json 2>/dev/null) <(python3 -m reporter courses.jsonl 2>/dev/null)
 python3 bench_mem.py                                                 # readlines > 10 MB, генератор < 1 MB
+
+# 6. pdb: breakpoint() прибрано (порожній вивід); сесії, `w`, порядок виконання — NOTES.md
+grep -rn 'breakpoint()' reporter/
 ```
