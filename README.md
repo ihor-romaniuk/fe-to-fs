@@ -53,12 +53,17 @@ printf 'DJANGO_SECRET_KEY=%s\nDJANGO_DEBUG=1\n' \
   "$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')" > .env    # один раз
 set -a; . ./.env; set +a                                             # у кожному новому терміналі
 python3 manage.py migrate
+python3 manage.py runserver & sleep 2                      # для curl нижче; наприкінці kill %1
 
 # 1. Каркас reviewhub, settings з env; незрозумілі блоки settings.py — ../NOTES.md
 python3 manage.py check                                    # System check identified no issues
 env -u DJANGO_SECRET_KEY python3 manage.py check; echo $?  # ImproperlyConfigured …, 1
-python3 manage.py runserver & sleep 2
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/reviews/   # 200
-kill %1
 grep -rn 'django-insecure' .                               # порожньо
+
+# 2. Список на шаблонах; {% empty %} і TemplateDoesNotExist — ../NOTES.md
+curl -s http://127.0.0.1:8000/reviews/ | grep -o '<li>' | wc -l   # 4 = len(REVIEWS); з REVIEWS = [] — 1
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/static/reviews/app.css   # 200, лише з DJANGO_DEBUG=1
+
+kill %1
 ```

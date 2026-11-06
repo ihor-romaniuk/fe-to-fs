@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Reviews · {{ block.super }}{% endblock %}
+
+{% block content %}
+<h1><a href="{% url 'reviews:review_list' %}">Reviews</a></h1>
+
+<p class="stats">
+  {{ review_count }} reviews{% if avg_rating is not None %} · average rating {{ avg_rating }} / 5{% endif %}
+</p>
+
+<ul class="reviews">
+  {% for review in reviews %}
+  <li>
+    <h2>{{ review.title }}</h2>
+    <p class="meta">{{ review.rating }} / 5 · {{ review.author }} · {{ review.created_at }}</p>
+    <p>{{ review.body|truncatechars:100 }}</p>
+  </li>
+  {% empty %}
+  <li>No reviews yet.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

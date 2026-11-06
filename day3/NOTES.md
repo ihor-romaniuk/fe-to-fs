@@ -69,3 +69,64 @@
     з'єднання, як аліаси в `DATABASES`. Замінюють `EMAIL_BACKEND` та `EMAIL_*`, які тепер
     deprecated (`django/core/mail/deprecation.py`). `console.EmailBackend` нічого не надсилає,
     а друкує лист у stdout `runserver`.
+
+# Задача 2. Список на Django Templates
+
+## `{% empty %}`
+
+Тимчасово `REVIEWS = []` у `reviews/store.py`. `runserver` перезавантажився сам, бо
+змінився `.py`. Сторінка показала `0 reviews` без середньої оцінки (у view `avg_rating = None`,
+у шаблоні `{% if avg_rating is not None %}`) і рівно один `<li>No reviews yet.</li>`. Дані
+повернуто, знову 4 `<li>`.
+
+## `TemplateDoesNotExist`
+
+`base.html` перейменовано на `base.html.off`. Сторінка дала 500, а `curl -H 'Accept: text/plain'`
+повернув налагоджувальну сторінку текстом. Шляхи нижче скорочено:
+
+```
+TemplateDoesNotExist at /reviews/
+base.html
+...
+Template loader postmortem
+Django tried loading these templates, in this order:
+
+Using engine django:
+    * filesystem.Loader:      reviewhub/templates/base.html (Source does not exist)
+    * app_directories.Loader: .venv/.../django/contrib/admin/templates/base.html (Source does not exist)
+    * app_directories.Loader: .venv/.../django/contrib/auth/templates/base.html (Source does not exist)
+    * app_directories.Loader: reviewhub/reviews/templates/base.html (Source does not exist)
+
+Template error:
+In template reviewhub/reviews/templates/reviews/review_list.html, error at line 1
+   1 :  {% extends "base.html" %}
+```
+
+Що з цього видно:
+
+- Порядок пошуку такий: спершу `DIRS`, потім `templates/` app-ів у порядку `INSTALLED_APPS`.
+  Перший знайдений файл виграє. Тому `DIRS` може перекрити шаблон будь-якого app-а, навіть
+  адмінки, а однакові імена в різних app-ах конфліктують. Звідси й обов'язкова папка
+  `reviews/` всередині `templates/`.
+- У списку лише `admin`, `auth` і `reviews`: у `contenttypes`, `sessions`, `messages`,
+  `staticfiles` немає папки `templates/`, і `app_directories` їх не перебирає.
+- Помилка вказує на `{% extends %}` у дочірньому шаблоні, а не на view: view просив
+  `reviews/review_list.html`, і цей шаблон знайшовся.
+
+**Несподіванка: на вже запущеному сервері помилки не було.** Після перейменування
+`base.html` сторінка й далі віддавала 200 зі старим вмістом. 500 з'явилось лише після
+перезапуску `runserver`. А коли файл повернули, без перезапуску сервер і далі віддавав
+500. 200 повернулось лише після `touch templates/base.html`. Причина в коді Django 6.1.3:
+
+- `template/engine.py:41`: якщо `loaders` не задано, Django завжди обгортає їх у
+  `cached.Loader`, і в розробці теж (так з Django 4.1). Скомпільований шаблон береться з кешу,
+  тож видалення файлу непомітне.
+- `template/loaders/cached.py`: кешується й промах, тобто `TemplateDoesNotExist`. Тому
+  повернутий файл теж непомітний.
+- Кеш скидає autoreload (`template/autoreload.py`, `template_changed` → `reset_loaders`), але
+  `StatReloader` реагує лише на зростання mtime вже відомого файлу (`utils/autoreload.py`,
+  `if old_time is None: continue`). Новий або видалений файл подію не породжує, а `touch`
+  породжує.
+
+Висновок: якщо шаблон перейменували, видалили чи додали, а сторінка поводиться дивно,
+перезапустіть `runserver`.
