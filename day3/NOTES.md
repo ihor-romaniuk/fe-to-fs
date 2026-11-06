@@ -175,3 +175,60 @@ In template reviewhub/reviews/templates/reviews/review_list.html, error at line 
 `csrfmiddlewaretoken` і через `get_token()` просить middleware виставити cookie у відповіді.
 `CsrfViewMiddleware` на POST порівнює токен із форми з cookie. Чужий сайт може змусити
 браузер надіслати cookie, але не може прочитати її й підставити токен у форму. Тег повернуто.
+
+# Задача 4. Admin на SQLite
+
+## Що зроблено
+
+- `admin` створено командою зі сніпета. Запуск `createsuperuser --noinput` бере пароль з
+  `DJANGO_SUPERUSER_PASSWORD` як є: `validate_password` викликається лише в інтерактивній
+  гілці (`contrib/auth/management/commands/createsuperuser.py:185` проти `:201`). Тому
+  `--noinput` пропустив би й пароль `123`. `admin12345` валідатори, до речі, пропускають
+  (перевірено `validate_password`).
+- Через Admin створено групу `reviewers` і користувача `olena` (пароль `olena-reviews-2026`),
+  а потім `olena` додано в групу. Запити ті самі, що робить браузер: логін, POST форм з
+  CSRF-токеном. Форма додавання користувача не має поля груп: Admin спершу створює
+  користувача й переводить на сторінку зміни, а групи вибираються вже там.
+- Кожну дію Admin записав у `django_admin_log` (кнопка History на сторінці об'єкта):
+  `Added` групи, `Added` користувача, `Changed Groups` користувача.
+
+## Чому в списку лише Users і Groups
+
+На головній `/admin/` єдиний блок — Authentication and Authorization → Groups, Users. Модель
+з'являється в Admin, лише коли її зареєстровано. Серед наших `INSTALLED_APPS` це робить тільки
+`django.contrib.auth` (`contrib/auth/admin.py:25` `@admin.register(Group)`, `:40`
+`@admin.register(User)`). `sessions` і `contenttypes` свої моделі не реєструють. Власних
+моделей ще немає; `admin.site.register` для них буде на Дні 4.
+
+## Хто робить redirect анонімного користувача
+
+`GET /admin/` без сесії дає `302 Location: /admin/login/?next=/admin/`. Ланцюжок у
+`django/contrib/admin/sites.py`:
+
+1. `AuthenticationMiddleware` кладе в `request.user` `AnonymousUser`.
+2. `path("", wrap(self.index), name="index")` (`:276`): кожен view Admin, крім `login/`,
+   обгорнуто в `wrap()` → `self.admin_view(view)`.
+3. `admin_view()` → `inner()` (`:235`): `if not self.has_permission(request):`.
+4. `has_permission()` (`:204`): `return request.user.is_active and request.user.is_staff`. Для
+   анонімного користувача це `False`.
+5. `return redirect_to_login(request.get_full_path(), reverse("admin:login", ...))` (`:244`).
+6. `redirect_to_login()` у `django/contrib/auth/views.py:184` дописує `?next=/admin/` і
+   повертає `HttpResponseRedirect`, тобто 302.
+
+`login/` не обгорнуто (`path("login/", self.login, ...)`), інакше redirect ішов би по колу.
+`LoginRequiredMiddleware` (з Django 5.1) тут ні до чого: її немає в `MIDDLEWARE`, Admin
+перевіряє доступ сам.
+
+## Звичайний користувач в Admin не зайде
+
+Вхід як `olena` з правильним паролем повертає ту саму форму (200) з помилкою «Please enter
+the correct username and password for a staff account». Її кидає
+`AdminAuthenticationForm.confirm_login_allowed()` (`contrib/admin/forms.py:20`), коли
+`not user.is_staff`. Повідомлення таке саме, як для неправильного пароля, тож не видає, що
+пароль був правильний. Група `reviewers` поки без прав. Щоб працювати в Admin, потрібні
+`is_staff` і права на конкретні моделі.
+
+## Чому «останнім рядком»
+
+З Django 5.2 `manage.py shell` сам імпортує моделі й першим рядком друкує
+`12 objects imported automatically (use -v 2 for details).`, а вже потім результат `-c`.

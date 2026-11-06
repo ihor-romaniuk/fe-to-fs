@@ -78,5 +78,12 @@ kill $PID; sleep 1; python3 manage.py runserver & PID=$!; sleep 2               
 curl -s http://127.0.0.1:8000/reviews/ | grep -c 'Tailwind Basics'                             # 0
 rm jar.txt
 
+# 4. Admin: аноніма веде на логін; користувачів 2 (admin і olena у групі reviewers) — ../NOTES.md
+# один раз: DJANGO_SUPERUSER_PASSWORD=admin12345 python3 manage.py createsuperuser \
+#             --noinput --username admin --email admin@example.com; olena і reviewers — через /admin/
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/admin/         # 302
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/admin/login/   # 200
+python3 manage.py shell -c "from django.contrib.auth.models import User; print(User.objects.count())"   # останній рядок: 2
+
 kill $PID
 ```
