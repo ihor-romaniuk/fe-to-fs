@@ -101,4 +101,8 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/static/reviews/ap
 curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: evil.example' http://127.0.0.1:8000/reviews/   # 400
 
 kill $PID
+
+# 6. Шлях GET /reviews/ і POST /reviews/new/ з файл:рядок і ознаками — ../NOTES.md
+grep -c -E '\.py:[0-9]+' ../NOTES.md                                        # ≥ 8
+sed -n '/^## POST/,/^## Три/p' ../NOTES.md | grep -o -w '403\|200\|302' | sort -u   # 200 302 403
 ```

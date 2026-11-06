@@ -329,3 +329,146 @@ AttributeError: 'WSGIRequest' object has no attribute 'user'
 - будь-який запит, навіть на `127.0.0.1`, дає 400 (перевірено).
 
 Якщо скопіювати `.env.example` і заповнити лише ключ, сайт відповідатиме 400 на все.
+
+# Задача 6. Шлях запиту
+
+Шляхи проєкту відраховано від `day3/`. Шляхи Django (`django/...`) — від
+`day3/.venv/lib/python3.12/site-packages/`, версія 6.1.3. Ознаки взято з перевірок
+задач 1–5 і з прогону `curl -D -` на сервері з поточним кодом.
+
+## GET /reviews/
+
+1. **WSGI.** `runserver` бере `WSGI_APPLICATION` (`reviewhub/reviewhub/settings.py:74`), а
+   той вказує на `application = get_wsgi_application()` (`reviewhub/reviewhub/wsgi.py:16`). На
+   кожен запит викликається `WSGIHandler.__call__` (`django/core/handlers/wsgi.py:120`): він
+   надсилає `request_started`, створює `WSGIRequest(environ)` (`:123`) і викликає
+   `self.get_response(request)` (`:124`), тобто ланцюжок middleware
+   (`django/core/handlers/base.py:142`).
+   *Ознака:* `[06/Nov/2026 11:31:42] "GET /reviews/ HTTP/1.1" 200 1414` — цей рядок пише сам
+   WSGI-сервер, коли відповідь уже готова.
+
+2. **Middleware вперед, зверху вниз за `MIDDLEWARE`** (`reviewhub/reviewhub/settings.py:46`):
+   - `SecurityMiddleware` (`settings.py:47`): на вході нічого, бо HTTPS-редирект вимкнено.
+   - `SessionMiddleware` (`settings.py:48`): лінивий `request.session`; cookie `sessionid`
+     у нас немає.
+   - `CommonMiddleware` (`settings.py:49`): перевіряє Host через `request.get_host()`
+     (`django/middleware/common.py:48`).
+     *Ознака:* `-H 'Host: evil.example'` дав 400, і наших `->`/`<-` для нього немає (Задача 5).
+   - `CsrfViewMiddleware` (`settings.py:50`): у `__call__` нічого. Перевірка відбувається
+     пізніше, у `process_view` (крок 3).
+   - `AuthenticationMiddleware` (`settings.py:51`): `request.user = SimpleLazyObject(...)`
+     (`django/contrib/auth/middleware.py:39`).
+     *Ознака:* без неї вище нашої — `AttributeError: 'WSGIRequest' object has no attribute 'user'`, 500 (Задача 5).
+   - `RequestLogMiddleware` (`settings.py:52`), рядок `reviewhub/reviewhub/middleware.py:15`.
+     *Ознака:* `-> GET /reviews/ user=AnonymousUser`.
+   - `MessageMiddleware` (`settings.py:53`): готує `request._messages`. *Ознаки немає*:
+     повідомлень ми не надсилаємо.
+   - `XFrameOptionsMiddleware` (`settings.py:54`): на вході нічого.
+
+3. **Resolver.** `_get_response()` викликає `resolve_request()`
+   (`django/core/handlers/base.py:183`) з `ROOT_URLCONF = 'reviewhub.urls'`
+   (`reviewhub/reviewhub/settings.py:57`). `path('reviews/', include('reviews.urls'))`
+   (`reviewhub/reviewhub/urls.py:21`) відрізає `reviews/`, і залишок `""` збігається з
+   `path("", views.review_list, name="review_list")` (`reviewhub/reviews/urls.py:7`). Далі цикл
+   `process_view` (`django/core/handlers/base.py:186`): `CsrfViewMiddleware.process_view`
+   (`django/middleware/csrf.py:414`) для GET одразу виходить (`csrf.py:425`).
+   *Ознака:* при `DEBUG=1` `/nope/` віддав 404 зі списком патернів `reviews/` і `admin/`, а
+   `{% url 'reviews:review_list' %}` дав `<a href="/reviews/">`.
+
+4. **View.** `review_list` (`reviewhub/reviews/views.py:8`) рахує кількість і середнє
+   (`views.py:10`, `views.py:11`) і викликає `render()` (`views.py:17`).
+   *Ознака:* `4 reviews · average rating 4.0 / 5`.
+
+5. **Template.** `render()` → `loader.render_to_string()` (`django/shortcuts.py:27`). Пошук
+   іде спершу в `DIRS` (`reviewhub/reviewhub/settings.py:62`), потім в `APP_DIRS`
+   (`settings.py:63`). Знайдено `reviewhub/reviews/templates/reviews/review_list.html`, у
+   ньому `{% extends "base.html" %}` (`review_list.html:1`), батьківський шаблон —
+   `reviewhub/templates/base.html`.
+   *Ознака:* `<title>Reviews · ReviewHub</title>` (`{{ block.super }}`). Шляхи пошуку видно в
+   postmortem `TemplateDoesNotExist` (Задача 2).
+
+6. **Escaping.** Кожен `{{ ... }}` проходить `render_value_in_context()`, а та при
+   `context.autoescape` повертає `conditional_escape(value)` (`django/template/base.py:1150`).
+   У нас це `{{ review.title }}` (`review_list.html:17`).
+   *Ознака:* `<h2>&lt;script&gt;alert(1)&lt;/script&gt;</h2>` (Задача 5).
+
+7. **HttpResponse.** `return HttpResponse(content, content_type, status)` (`django/shortcuts.py:28`).
+   *Ознака:* `HTTP/1.1 200 OK`, `Content-Type: text/html; charset=utf-8`.
+
+8. **Middleware назад, знизу вгору:**
+   - `XFrameOptionsMiddleware`: `response.headers["X-Frame-Options"] = ...`
+     (`django/middleware/clickjacking.py:34`).
+     *Ознака:* `X-Frame-Options: DENY`.
+   - `MessageMiddleware`: повідомлень немає, *ознаки немає*.
+   - `RequestLogMiddleware`: `reviewhub/reviewhub/middleware.py:17`.
+     *Ознака:* `<- /reviews/ 200`.
+   - `AuthenticationMiddleware`: на виході нічого.
+   - `CsrfViewMiddleware.process_response` (`django/middleware/csrf.py:472`): шаблон списку не
+     викликав `get_token()`.
+     *Ознака:* у відповіді на `GET /reviews/` немає `Set-Cookie` (на `GET /reviews/new/` він є).
+   - `CommonMiddleware.process_response` (`django/middleware/common.py:107`): 404 на шляху без
+     слеша перетворюється на 301.
+     *Ознака:* на `GET /reviews` наш лог пише `<- /reviews 404`, а клієнт отримує
+     `301 Location: /reviews/`. Наша middleware всередині, тож бачить 404 раніше, ніж
+     `CommonMiddleware` його підмінить.
+   - `SessionMiddleware.process_response`: сесію читали, тому
+     `patch_vary_headers(response, ("Cookie",))` (`django/contrib/sessions/middleware.py:81`).
+     *Ознака:* `Vary: Cookie`. Сесію читає наш `str(request.user)` у лозі: лінивий user
+     обчислюється й лізе в сесію. Перевірено test Client: без `RequestLogMiddleware`
+     `Vary` немає, з нею — `Cookie`. Тобто логування зробило сторінку гіршою для кешів.
+   - `SecurityMiddleware`: `X-Content-Type-Options` (`django/middleware/security.py:47`),
+     `Referrer-Policy`, `Cross-Origin-Opener-Policy`.
+     *Ознака:* `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`,
+     `Cross-Origin-Opener-Policy: same-origin`.
+
+9. **Назад у WSGI.** `start_response(status, response_headers)` (`django/core/handlers/wsgi.py:133`),
+   потім сервер відправляє тіло й пише рядок логу з кроку 1.
+
+## POST /reviews/new/
+
+Кроки 1–2 ті самі. *Ознака:* `-> POST /reviews/new/ user=AnonymousUser`. Нижче лише те, що
+відрізняється.
+
+3. **Resolver.** Залишок `new/` збігається з
+   `path("new/", views.review_create, name="review_create")` (`reviewhub/reviews/urls.py:8`).
+
+3a. **[відмінність] CSRF → 403.** `CsrfViewMiddleware.process_view`
+   (`django/middleware/csrf.py:414`): POST не є безпечним методом, тому викликається
+   `self._check_token(request)` (`csrf.py:466`). Без cookie це
+   `RejectRequest(REASON_NO_CSRF_COOKIE)` (`csrf.py:362`), далі `return self._reject(...)`
+   (`csrf.py:468`): відповідь **403**, view не викликається. Поле й cookie дає
+   `{% csrf_token %}` у формі (`review_form.html:9`).
+   *Ознака:* у лозі `-> POST /reviews/new/ user=AnonymousUser`, потім
+   `Forbidden (CSRF cookie not set.): /reviews/new/`, потім `<- /reviews/new/ 403`. Наш `->`
+   стоїть **раніше** за `Forbidden`, хоча `CsrfViewMiddleware` вище в списку: `process_view`
+   працює вже після всіх `__call__`, між resolver і view. А `403` повертається крізь усі
+   middleware назад, тому є й наш `<-`.
+
+4. **View.** `review_create` (`reviewhub/reviews/views.py:20`): `request.method == "POST"`
+   (`views.py:21`), `ReviewForm(request.POST)` (`views.py:22`), **`form.is_valid()`**
+   (`views.py:23`). Усередині — валідація полів (`max_value=5` у `reviewhub/reviews/forms.py:7`),
+   `clean_title` (`forms.py:10`), потім `clean()` (`forms.py:18`).
+
+5a. **[відмінність] Гілка помилок → 200.** `is_valid()` повертає `False`, і виконання
+   доходить до `render(request, "reviews/review_form.html", {"form": form})` (`views.py:32`).
+   Кроки 5–9 як у GET, але з `review_form.html`.
+   *Ознака:* `HTTP/1.1 200 OK`, `<ul class="errorlist" id="id_title_error"><li>Title must be
+   at least 3 characters long.`, `<- /reviews/new/ 200`.
+
+5b. **[відмінність] Гілка redirect → 302.** `REVIEWS.append(...)` (`views.py:26`), потім
+   `return redirect("reviews:review_list")` (`views.py:28`): `reverse()` дає `/reviews/`,
+   відповідь — `HttpResponseRedirect`. Шаблон не рендериться. Middleware назад як у GET.
+   *Ознака:* `HTTP/1.1 302 Found`, `Location: /reviews/`, `<- /reviews/new/ 302`. Далі
+   браузер робить **новий** `GET /reviews/` (увесь шлях вище), і `grep -c 'Tailwind Basics'`
+   дає 1.
+
+## Три питання про settings.py — повернутися на Дні 4
+
+1. `DATABASES` (`reviewhub/reviewhub/settings.py:80`) для Postgres: який `ENGINE`, як
+   передати облікові дані з env (окремі змінні чи один `DATABASE_URL`) і що змінюють
+   `CONN_MAX_AGE` та `CONN_HEALTH_CHECKS`?
+2. У `settings.py` немає `DEFAULT_AUTO_FIELD`, а в `reviewhub/reviews/apps.py` немає
+   `default_auto_field`. Який тип первинного ключа отримає модель `Review` і хто це вирішує?
+3. `TIME_ZONE = 'UTC'` і `USE_TZ = True` (`settings.py:112`, `settings.py:116`): у якому вигляді
+   Postgres зберігатиме `created_at`, у якій зоні його покаже Admin і чи варто ставити
+   `'Europe/Kyiv'`?
