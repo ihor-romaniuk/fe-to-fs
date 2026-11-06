@@ -41,3 +41,24 @@ python3 bench_mem.py                                                 # readlines
 # 6. pdb: breakpoint() прибрано (порожній вивід); сесії, `w`, порядок виконання — NOTES.md
 grep -rn 'breakpoint()' reporter/
 ```
+
+## День 3
+
+```bash
+cd day3
+python3 -m venv .venv && .venv/bin/pip install -r reviewhub/requirements.txt   # один раз
+source .venv/bin/activate
+cd reviewhub
+printf 'DJANGO_SECRET_KEY=%s\nDJANGO_DEBUG=1\n' \
+  "$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')" > .env    # один раз
+set -a; . ./.env; set +a                                             # у кожному новому терміналі
+python3 manage.py migrate
+
+# 1. Каркас reviewhub, settings з env; незрозумілі блоки settings.py — ../NOTES.md
+python3 manage.py check                                    # System check identified no issues
+env -u DJANGO_SECRET_KEY python3 manage.py check; echo $?  # ImproperlyConfigured …, 1
+python3 manage.py runserver & sleep 2
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/reviews/   # 200
+kill %1
+grep -rn 'django-insecure' .                               # порожньо
+```
