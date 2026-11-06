@@ -85,5 +85,20 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/admin/         # 
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/admin/login/   # 200
 python3 manage.py shell -c "from django.contrib.auth.models import User; print(User.objects.count())"   # останній рядок: 2
 
+# 5. Escaping, middleware, DEBUG=0 — ../NOTES.md
+TOKEN=$(curl -s -c jar.txt http://127.0.0.1:8000/reviews/new/ \
+  | grep -o 'name="csrfmiddlewaretoken" value="[^"]*"' | cut -d'"' -f4)
+curl -s -o /dev/null -b jar.txt -X POST http://127.0.0.1:8000/reviews/new/ -d "csrfmiddlewaretoken=$TOKEN" \
+  --data-urlencode "title=<script>alert(1)</script>" -d "author=mallory" -d "rating=5" -d "body=hi"; rm jar.txt
+curl -s http://127.0.0.1:8000/reviews/ | grep -c '&lt;script&gt;'                 # 1
+curl -s http://127.0.0.1:8000/reviews/ | grep -c '<script>alert'                   # 0
+# вивід runserver навколо кожного запиту: "-> GET /reviews/ user=AnonymousUser", "<- /reviews/ 200"
+# middleware першим у MIDDLEWARE: 500, AttributeError: 'WSGIRequest' object has no attribute 'user'
+kill $PID; sleep 1; DJANGO_DEBUG=0 python3 manage.py runserver & PID=$!; sleep 2
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/nope/                    # 404
+curl -s http://127.0.0.1:8000/nope/ | grep -c URLconf                                   # 0 (з DEBUG=1 — 1)
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/static/reviews/app.css   # 404
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: evil.example' http://127.0.0.1:8000/reviews/   # 400
+
 kill $PID
 ```

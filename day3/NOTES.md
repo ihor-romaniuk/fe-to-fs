@@ -232,3 +232,100 @@ the correct username and password for a staff account». Її кидає
 
 З Django 5.2 `manage.py shell` сам імпортує моделі й першим рядком друкує
 `12 objects imported automatically (use -v 2 for details).`, а вже потім результат `-c`.
+
+# Задача 5. Escaping, middleware, DEBUG
+
+## Escaping
+
+Через форму надіслано `title=<script>alert(1)</script>` (302). У списку:
+
+```html
+<h2>&lt;script&gt;alert(1)&lt;/script&gt;</h2>
+```
+
+`grep -c '&lt;script&gt;'` дає 1, `grep -c '<script>alert'` — 0. Валідація форми тут не
+допомагає й не мусить: назва довша за 3 символи, тобто валідна. Захищає автоекранування
+під час виводу.
+
+Із `{{ review.title|safe }}` у HTML потрапив живий `<h2><script>alert(1)</script></h2>`
+(лічильники 0 і 1), і браузер його виконає. Шаблон повернуто, знову 1 і 0. `|safe` означає
+«я ручаюся, що це безпечний HTML», а дані з форми таким не є ніколи.
+
+## RequestLogMiddleware
+
+Клас лежить у `reviewhub/middleware.py`: він наскрізний, не про відгуки. У `MIDDLEWARE` він
+стоїть одразу після `AuthenticationMiddleware`. Вивід `runserver` на POST форми:
+
+```
+-> POST /reviews/new/ user=AnonymousUser
+<- /reviews/new/ 302
+[06/Nov/2026 11:28:17] "POST /reviews/new/ HTTP/1.1" 302 0
+```
+
+Між `->` і `<-` працює решта ланцюжка й view. Рядок `runserver` іде останнім: сервер пише
+його, коли handler уже повернув відповідь. `logger.warning`, а не `info`, бо `LOGGING` не
+налаштовано: у логера `reviewhub.middleware` немає handler-ів, і в stderr його виводить лише
+`logging.lastResort`, у якого поріг WARNING.
+
+## Middleware першим у списку
+
+```
+Internal Server Error: /reviews/
+Traceback (most recent call last):
+  File ".venv/.../django/core/handlers/exception.py", line 56, in inner
+    response = get_response(request)
+  File "reviewhub/reviewhub/middleware.py", line 15, in __call__
+    logger.warning("-> %s %s user=%s", request.method, request.path, request.user)
+AttributeError: 'WSGIRequest' object has no attribute 'user'
+```
+
+Статус 500. `request.user` створює `AuthenticationMiddleware`, а запит до неї ще не дійшов:
+наш клас тепер зовнішній шар цибулини. Кадрів у traceback лише два: обгортка
+`convert_exception_to_response` (`inner`) і наш `__call__`, більше нічого не встигло
+виконатись. Порядок повернуто, знову 200.
+
+## DEBUG=0: три наслідки
+
+| Запит | `DEBUG=1` | `DEBUG=0` |
+|---|---|---|
+| `/nope/` | 404, сторінка на 2,4 КБ зі списком URL-патернів і `URLconf` | 404, 179 байт: `Not Found` |
+| `/static/reviews/app.css` | 200, файл | 404, той самий `Not Found` |
+| `Host: evil.example` | 400, налагоджувальна сторінка `DisallowedHost` на 67 КБ | 400, 143 байти: `Bad Request (400)` |
+
+Чому:
+
+1. **`/nope/`.** `django/core/handlers/exception.py:65`: на `Http404` при `DEBUG` викликається
+   `debug.technical_404_response()` (показує, які патерни Django перебрав), інакше
+   `get_exception_response(..., 404)`, тобто шаблон `404.html` або вбудована сторінка
+   `Not Found`. Відвідувачу не видно структури URL.
+2. **Статика.** `django/contrib/staticfiles/management/commands/runserver.py:34`:
+   `if use_static_handler and (settings.DEBUG or insecure_serving): return StaticFilesHandler(handler)`.
+   При `DEBUG=1` цей обробник перехоплює `/static/` ще до middleware, і в лозі немає наших
+   `->`/`<-` для CSS. При `DEBUG=0` запит іде звичайним шляхом: через middleware в URLconf,
+   де `/static/` немає, тож 404. Сторінки працюють, але без стилів. У продакшні статику
+   роздає веб-сервер або WhiteNoise після `collectstatic`; примусово в `runserver` — прапорець
+   `--insecure`.
+3. **Чужий Host.** Статус **не змінився**: 400 в обох режимах, бо `ALLOWED_HOSTS` у нас —
+   явний список. Змінились тіло й лог. `exception.py:114`: на `SuspiciousOperation`
+   (`DisallowedHost` — її підклас) при `DEBUG` віддається `technical_500_response(status_code=400)`
+   з traceback і налаштуваннями, інакше коротка сторінка 400. `DisallowedHost` кидає вже
+   `CommonMiddleware` (`request.get_host()`), до нашої middleware запит не доходить, тому
+   `->`/`<-` для нього немає.
+
+Ще один наслідок у консолі. При `DEBUG=0` зникли рядки `Not Found: /nope/` і traceback
+`Invalid HTTP_HOST header`. У `DEFAULT_LOGGING` (`django/utils/log.py:39`) handler `console`
+має фільтр `require_debug_true`, а помилки при `DEBUG=0` йдуть у `mail_admins`. Без
+`ADMINS` і власного `LOGGING` вони не видно ніде. Для продакшну `LOGGING` треба налаштувати.
+
+## Пастка в settings із Задачі 1
+
+`DJANGO_ALLOWED_HOSTS=` (порожній рядок, саме так у `.env.example`) дає
+`ALLOWED_HOSTS = ['']`. `os.environ.get` повертає `""`, а не значення за замовчуванням, і
+`"".split(",")` дає `['']`. Такий список не порожній, тому:
+
+- `runserver` при `DEBUG=0` не відмовляється стартувати (`runserver.py:80` перевіряє лише
+  порожній список);
+- при `DEBUG=1` не вмикається запасний варіант `.localhost`/`127.0.0.1`/`[::1]`;
+- будь-який запит, навіть на `127.0.0.1`, дає 400 (перевірено).
+
+Якщо скопіювати `.env.example` і заповнити лише ключ, сайт відповідатиме 400 на все.
