@@ -9,6 +9,8 @@
   {{ review_count }} reviews{% if avg_rating is not None %} · average rating {{ avg_rating }} / 5{% endif %}
 </p>
 
+<p><a href="{% url 'reviews:review_create' %}">Write a review</a></p>
+
 <ul class="reviews">
   {% for review in reviews %}
   <li>

@@ -130,3 +130,48 @@ In template reviewhub/reviews/templates/reviews/review_list.html, error at line 
 
 Висновок: якщо шаблон перейменували, видалили чи додали, а сторінка поводиться дивно,
 перезапустіть `runserver`.
+
+# Задача 3. Форма, валідація, CSRF, redirect після POST
+
+## Три сценарії зі сніпета
+
+| Запит | Код | Що сталося |
+|---|---|---|
+| `title=Ok`, `rating=9`, з токеном | 200 | та сама форма, `errorlist` у `title` і `rating` |
+| `title=Tailwind Basics`, `rating=5`, з токеном | 302 | `Location: /reviews/`, запис у `REVIEWS` |
+| `title=X`, без cookie і токена | 403 | `CSRF cookie not set.` |
+
+Після валідного POST `grep -c 'Tailwind Basics'` дав 1, після рестарту `runserver` — 0.
+Будь-яка правка `.py` теж перезапускає процес і стирає додані записи. Правка шаблону лише
+скидає кеш шаблонів (`template_changed` повертає `True`), тож запис її переживає: так і
+сталося під час експерименту з CSRF нижче.
+
+## Валідація (перевірено в `manage.py shell`)
+
+- `"  ab  "` дає помилку довжини, `"  abc  "` перетворюється на `"abc"`. `CharField` обрізає
+  пробіли ще до `clean_title` (`strip=True` за замовчуванням), тож явний `strip()` — страховка.
+- `rating=2`: `body` із 19 символів дає помилку в `body`, із 20 — валідно. `rating=3` з
+  коротким `body` теж валідно.
+- `rating=1` з порожнім `body` дає лише `This field is required.`: поле, що не пройшло власну
+  валідацію, відсутнє в `cleaned_data`, і `clean()` друге повідомлення не додає.
+- У сценарії 1 правило з `clean()` не спрацювало, бо `rating=9` не пройшов `max_value`.
+- `{{ form.as_p }}` ставить `<ul class="errorlist">` над полем, `aria-invalid="true"` і
+  `aria-describedby` на input, а також HTML-атрибути `required`, `maxlength`, `min`/`max`.
+  Тому в браузері `rating=9` не відправиться взагалі: браузер зупинить форму сам. Серверна
+  валідація — справжній захист, а `curl` обходить браузерну й показує саме її.
+
+## CSRF: причини 403 (сторінка 403 при `DEBUG=1`, рядок «Reason given for failure»)
+
+| Що надіслано | Причина |
+|---|---|
+| ні cookie, ні токена (сценарій 3) | `CSRF cookie not set.` |
+| cookie є, токена у формі немає | `CSRF token missing.` |
+| cookie є, токен `xxx` | `CSRF token from POST has incorrect length.` |
+| **без `{% csrf_token %}`**, новий відвідувач | `CSRF cookie not set.` |
+| **без `{% csrf_token %}`**, cookie лишилась з минулого візиту | `CSRF token missing.` |
+
+Без тега в HTML немає прихованого поля і, що менш очевидно, сервер навіть не ставить cookie
+`csrftoken`: `curl -c` після GET отримав порожній jar. Тег робить дві речі: вставляє поле
+`csrfmiddlewaretoken` і через `get_token()` просить middleware виставити cookie у відповіді.
+`CsrfViewMiddleware` на POST порівнює токен із форми з cookie. Чужий сайт може змусити
+браузер надіслати cookie, але не може прочитати її й підставити токен у форму. Тег повернуто.

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}New review · {{ block.super }}{% endblock %}
+
+{% block content %}
+<h1>New review</h1>
+
+<form method="post" action="{% url 'reviews:review_create' %}">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit">Save</button>
+</form>
+
+<p><a href="{% url 'reviews:review_list' %}">Back to reviews</a></p>
+{% endblock %}

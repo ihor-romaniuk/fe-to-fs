@@ -53,7 +53,7 @@ printf 'DJANGO_SECRET_KEY=%s\nDJANGO_DEBUG=1\n' \
   "$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')" > .env    # один раз
 set -a; . ./.env; set +a                                             # у кожному новому терміналі
 python3 manage.py migrate
-python3 manage.py runserver & sleep 2                      # для curl нижче; наприкінці kill %1
+python3 manage.py runserver & PID=$!; sleep 2              # порт 8000 має бути вільним; наприкінці kill $PID
 
 # 1. Каркас reviewhub, settings з env; незрозумілі блоки settings.py — ../NOTES.md
 python3 manage.py check                                    # System check identified no issues
@@ -65,5 +65,18 @@ grep -rn 'django-insecure' .                               # порожньо
 curl -s http://127.0.0.1:8000/reviews/ | grep -o '<li>' | wc -l   # 4 = len(REVIEWS); з REVIEWS = [] — 1
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/static/reviews/app.css   # 200, лише з DJANGO_DEBUG=1
 
-kill %1
+# 3. Форма: 200 з помилками, 302 після збереження, 403 без CSRF; причини 403 — ../NOTES.md
+TOKEN=$(curl -s -c jar.txt http://127.0.0.1:8000/reviews/new/ \
+  | grep -o 'name="csrfmiddlewaretoken" value="[^"]*"' | cut -d'"' -f4)
+curl -s -o /dev/null -w '%{http_code}\n' -b jar.txt -X POST http://127.0.0.1:8000/reviews/new/ \
+  -d "csrfmiddlewaretoken=$TOKEN" -d "title=Ok" -d "author=ivan" -d "rating=9" -d "body=x"      # 200
+curl -s -o /dev/null -w '%{http_code}\n' -b jar.txt -X POST http://127.0.0.1:8000/reviews/new/ \
+  -d "csrfmiddlewaretoken=$TOKEN" -d "title=Tailwind Basics" -d "author=olena" -d "rating=5" -d "body=ok"  # 302
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8000/reviews/new/ -d "title=X"   # 403
+curl -s http://127.0.0.1:8000/reviews/ | grep -c 'Tailwind Basics'                             # 1
+kill $PID; sleep 1; python3 manage.py runserver & PID=$!; sleep 2                             # рестарт
+curl -s http://127.0.0.1:8000/reviews/ | grep -c 'Tailwind Basics'                             # 0
+rm jar.txt
+
+kill $PID
 ```
