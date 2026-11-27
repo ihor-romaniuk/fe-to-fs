@@ -128,4 +128,21 @@ python3 manage.py shell -c "from django.db import connection; print(connection.v
 docker compose exec db psql -U reviewhub -d reviewhub -c '\dt' | grep -o -w 'auth_user\|django_migrations'   # обидві
 python3 manage.py dbshell; echo $?                    # без локального psql: CommandError …, 1
 ls db.sqlite3                                         # No such file or directory
+
+# 2. Моделі ReviewRequest і Comment; on_delete по кожному FK — ../../day4/NOTES.md
+python3 manage.py shell < seed.py | tail -1     # users: 5 requests: 60 comments: 300 (запити перестворює)
+python3 manage.py shell -c '
+from django.db import IntegrityError
+from django.db.models import ProtectedError
+from django.contrib.auth.models import User
+from reviews.models import ReviewRequest
+rr = ReviewRequest.objects.first()
+try: ReviewRequest.objects.create(author=rr.author, title=rr.title, course_url="https://x.example/")
+except IntegrityError as e: print(e)
+try: User.objects.get(username="user0").delete()
+except ProtectedError as e: print(type(e).__name__)
+print(ReviewRequest.objects.first().delete())'
+# duplicate key value violates unique constraint "uniq_review_request_author_title" …
+# ProtectedError
+# (6, {'reviews.Comment': 5, 'reviews.ReviewRequest': 1})
 ```
