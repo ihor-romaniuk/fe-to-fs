@@ -136,3 +136,111 @@ docker compose exec db psql -U reviewhub -d reviewhub
 `auth` задає власний `default_auto_field = "django.db.models.AutoField"`
 (`django/contrib/auth/apps.py:14`), тому `auth_user.id` — `integer`, а FK повторює тип ключа, на
 який посилається.
+
+# Задача 3. 0001_initial і sqlmigrate
+
+## Розбіжність з перевіркою задачі
+
+Задача чекає 5 `CREATE INDEX` і 4 `ADD CONSTRAINT`, а у нас 6 і 5. Зайве в обох лічильниках
+дає FK `Comment.author` (`PROTECT`), якого вимагає Задача 2: це індекс
+`reviews_comment_author_id_536ef402` і констрейнт
+`reviews_comment_author_id_536ef402_fk_auth_user_id`. Числа задачі пасують до трьох FK, а
+моделі з Задачі 2 мають чотири. Модель не міняли.
+
+## Операції в `0001_initial.py` у порядку виконання
+
+0. `dependencies = [swappable_dependency(AUTH_USER_MODEL)]`: спершу має бути застосована
+   міграція, яка створює модель користувача, бо на її таблицю посилаються FK.
+1. `CreateModel ReviewRequest`: `id`, `title`, `course_url`, `description`, `status`, `created_at`,
+   `author`, `reviewer`.
+2. `CreateModel Comment`: `id`, `body`, `created_at`, `author`, `review_request`.
+3. `AddConstraint uniq_review_request_author_title` на `reviewrequest`.
+
+FK-поля опинилися в кінці списку, ще й за абеткою. Наприклад, у `Comment` поле `author` стоїть
+перед `review_request`, хоча в `models.py` порядок навпаки. Причина така: autodetector спершу
+створює модель без зв'язків, а кожен зв'язок додає окремим `AddField`, відсортувавши за
+іменем (`django/db/migrations/autodetector.py:740`, `:764`). Потім оптимізатор вливає ці
+`AddField` у `CreateModel`, дописуючи їх у кінець полів
+(`django/db/migrations/operations/models.py:230`). Тому й у таблиці колонки `author_id` і
+`reviewer_id` останні.
+
+## Що в SQL і чому в такому порядку
+
+- `BEGIN;` … `COMMIT;`: міграція атомарна, а Postgres уміє відкочувати DDL
+  (`can_rollback_ddl = True`, `django/db/backends/postgresql/features.py:32`). `sqlmigrate`
+  друкує ці рядки лише в такому разі (`django/core/management/commands/sqlmigrate.py:74`). Якщо
+  міграція впаде посередині, не залишиться ні таблиць, ні індексів.
+- Два `CREATE TABLE` виконуються одразу, кожен у своєму `CreateModel`.
+- `ADD CONSTRAINT "uniq_review_request_author_title" UNIQUE ("author_id", "title")`: `AddConstraint`
+  теж виконується одразу (`django/db/backends/base/schema.py:602`).
+- 4 × `ADD CONSTRAINT … FOREIGN KEY … DEFERRABLE INITIALLY DEFERRED` і 6 × `CREATE INDEX`
+  потрапляють у `deferred_sql`. Django накопичує їх під час `CreateModel` (FK у
+  `base/schema.py:252`, індекси в `:544`) і виконує на виході зі schema editor, тобто
+  наприкінці міграції (`base/schema.py:173`). Через це `UNIQUE` з останньої операції стоїть у
+  SQL раніше за FK та індекси з першої. Вбудованого FK усередині `CREATE TABLE` бекенд Postgres у
+  Django не використовує (`sql_create_inline_fk = None`), тож таблиці можуть посилатися одна на
+  одну в будь-якому порядку створення.
+
+## Індекси: ім'я і причина появи
+
+Шаблон імені: `<таблиця>_<колонки>_<8 hex>` плюс суфікс. Хеш рахується від імен таблиці й
+колонок (`base/schema.py:1543`), щоб ім'я було унікальним і вміщалося в 63 символи Postgres.
+
+| # | Індекс | Колонка | Причина |
+|---|---|---|---|
+| 1 | `reviews_reviewrequest_status_63d3e3fd` | `status` | замовлений явно: `db_index=True` |
+| 2 | `reviews_reviewrequest_status_63d3e3fd_like` | `status varchar_pattern_ops` | побічний: бекенд Postgres додає його для кожного `varchar`/`text` з `db_index` або `unique` (`django/db/backends/postgresql/schema.py:61`, `:83`) |
+| 3 | `reviews_reviewrequest_author_id_2ea7bdf1` | `author_id` | побічний: у `ForeignKey` за замовчуванням `db_index=True` (`django/db/models/fields/related.py:1039`) |
+| 4 | `reviews_reviewrequest_reviewer_id_0f796ec4` | `reviewer_id` | побічний: FK, як № 3 |
+| 5 | `reviews_comment_author_id_536ef402` | `author_id` | побічний: FK, як № 3 |
+| 6 | `reviews_comment_review_request_id_a40001e9` | `review_request_id` | побічний: FK, як № 3 |
+
+**Навіщо два індекси на `status`.** Звичайний btree порівнює рядки за collation бази
+(`en_US.utf8`) і годиться для `=`, `IN`, діапазонів і `ORDER BY` (документація Postgres). Для
+`LIKE 'op%'` за не-C collation він не годиться. Перевірено: `status__startswith="op"` Django
+перетворює на `"status"::text LIKE 'op%'`. Із `SET LOCAL enable_seqscan = off` Postgres бере
+`Bitmap Index Scan on reviews_reviewrequest_status_63d3e3fd_like` з умовою
+`status ~>=~ 'op' AND status ~<~ 'oq'`. Якщо в транзакції, яку потім відкотили, зробити
+`DROP INDEX …_like`, план стає `Seq Scan`, хоча seq scan вимкнено. Отже, звичайний індекс для
+`LIKE` не підходить.
+
+**Навіщо індекси на FK.** Для PK і `UNIQUE` Postgres створює індекс сам, а для колонки, яка
+посилається на іншу таблицю, — ні. Django створює його сам, бо за FK-колонками роблять JOIN і
+фільтрують (`?review_request=<id>` на Дні 5). Крім того, `CASCADE`/`PROTECT`/`SET_NULL` шукають
+саме за ними: `DELETE FROM reviews_comment WHERE review_request_id IN (…)` із Задачі 2. Тому
+`db_index=True` на FK зайвий, це вже дефолт. Вимкнути індекс можна через `db_index=False`.
+
+## Скільки індексів замовлено явно
+
+- Серед 6 `CREATE INDEX` явно замовлений 1 (`db_index=True` на `status`). Ще 5 — побічний ефект
+  типів полів: `_like` через `CharField` на Postgres і 4 FK.
+- У самій базі на цих двох таблицях 9 індексів (`pg_indexes`). До шести з SQL додаються
+  `uniq_review_request_author_title` (Postgres тримає `UNIQUE`-констрейнт як унікальний індекс;
+  замовлений явно через `UniqueConstraint`, але це не `CREATE INDEX`) і два `_pkey` (побічний
+  ефект автоматичного `id`). Разом: явно 2, побічно 7.
+
+## `DEFERRABLE INITIALLY DEFERRED`: коли Postgres перевіряє FK
+
+Так оголошені всі 4 FK, і Django робить це для кожного FK на Postgres
+(`django/db/backends/postgresql/operations.py:151`). `DEFERRABLE` означає, що перевірку можна
+відкласти, а `INITIALLY DEFERRED` — що її відкладено за замовчуванням. **Postgres перевіряє такий
+FK не під час `INSERT`/`UPDATE`/`DELETE`, а на `COMMIT` транзакції.** Перевірено:
+
+- `psql`: `BEGIN; INSERT INTO reviews_comment (…, review_request_id) VALUES (…, 999999)` дає
+  `INSERT 0 1`. Помилка `violates foreign key constraint
+  "reviews_comment_review_request_id_a40001e9_fk_reviews_r"` з'являється лише на `COMMIT`.
+- Після `SET CONSTRAINTS ALL IMMEDIATE` у транзакції та сама помилка з'являється одразу на
+  `INSERT`.
+- Django без транзакції (autocommit): кожен запит — окрема транзакція з `COMMIT` одразу після
+  `INSERT`, тому `Comment.objects.create(review_request_id=999999, …)` кидає `IntegrityError`
+  одразу.
+- Django в `transaction.atomic()`: `create()` повертає об'єкт з `id`, вкладений `atomic()`
+  (savepoint) закривається без помилки. `IntegrityError` з'являється на виході із зовнішнього
+  блоку, тобто на `COMMIT`. У базі нічого не лишається.
+
+Навіщо так. Усередині транзакції рядки можна вставляти в будь-якому порядку (`loaddata` із
+посиланнями вперед, циклічні FK), головне, щоб на коміті все сходилося. Ціна: помилка
+з'являється далеко від рядка, який її спричинив, — наприкінці `atomic`, а не на `create()`.
+`TestCase` загортає кожен тест у транзакцію, яку потім відкочує, тому сам перевіряє констрейнти
+наприкінці тесту (`django/test/testcases.py:1497`). Інакше зламаний FK у тесті ніхто б не
+помітив.

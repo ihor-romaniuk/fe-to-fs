@@ -145,4 +145,10 @@ print(ReviewRequest.objects.first().delete())'
 # duplicate key value violates unique constraint "uniq_review_request_author_title" …
 # ProtectedError
 # (6, {'reviews.Comment': 5, 'reviews.ReviewRequest': 1})
+
+# 3. 0001_initial і sqlmigrate: порядок операцій, індекси, DEFERRABLE — ../../day4/NOTES.md
+python3 manage.py sqlmigrate reviews 0001 | grep -c 'CREATE INDEX'     # 6 (задача чекає 5 — чому, у NOTES)
+python3 manage.py sqlmigrate reviews 0001 | grep -c 'ADD CONSTRAINT'   # 5 (задача чекає 4)
+for i in $(python3 manage.py sqlmigrate reviews 0001 | grep -o 'CREATE INDEX "[^"]*"' | cut -d'"' -f2); do
+  grep -q "$i" ../../day4/NOTES.md || echo "у NOTES немає $i"; done                 # порожньо
 ```
