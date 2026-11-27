@@ -77,10 +77,15 @@ WSGI_APPLICATION = 'reviewhub.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
+# Дефолти збігаються з docker-compose.yml, тож локально змінні можна не задавати
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get("POSTGRES_DB", "reviewhub"),
+        'USER': os.environ.get("POSTGRES_USER", "reviewhub"),
+        'PASSWORD': os.environ.get("POSTGRES_PASSWORD", "reviewhub"),
+        'HOST': os.environ.get("POSTGRES_HOST", "127.0.0.1"),
+        'PORT': os.environ.get("POSTGRES_PORT", "5432"),
     }
 }
 

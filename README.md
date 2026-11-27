@@ -106,3 +106,26 @@ kill $PID
 grep -c -E '\.py:[0-9]+' ../NOTES.md                                        # ≥ 8
 sed -n '/^## POST/,/^## Три/p' ../NOTES.md | grep -o -w '403\|200\|302' | sort -u   # 200 302 403
 ```
+
+## День 4
+
+Код — далі в `day3/reviewhub`, нотатки — `day4/NOTES.md`.
+
+```bash
+cd day3
+.venv/bin/pip install -r reviewhub/requirements.txt                 # один раз: psycopg
+source .venv/bin/activate
+cd reviewhub
+set -a; . ./.env; set +a                                             # у кожному новому терміналі
+docker compose up -d db
+until docker compose exec db pg_isready -U reviewhub -q; do sleep 1; done
+python3 manage.py migrate
+# один раз: DJANGO_SUPERUSER_PASSWORD=admin12345 python3 manage.py createsuperuser \
+#             --noinput --username admin --email admin@example.com
+
+# 1. Postgres у Docker; потрібні змінні середовища — ../../day4/NOTES.md
+python3 manage.py shell -c "from django.db import connection; print(connection.vendor)"   # останній рядок: postgresql
+docker compose exec db psql -U reviewhub -d reviewhub -c '\dt' | grep -o -w 'auth_user\|django_migrations'   # обидві
+python3 manage.py dbshell; echo $?                    # без локального psql: CommandError …, 1
+ls db.sqlite3                                         # No such file or directory
+```
